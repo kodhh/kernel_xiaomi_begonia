@@ -44,7 +44,7 @@ struct workspace {
 static void zstd_set_level(struct list_head *ws, unsigned int type)
 {
     struct workspace *workspace = list_entry(ws, struct workspace, list);
-    unsigned int level = (type & 0xF0) >> 4;  // 从高4位提取级别
+    unsigned int level = (type >> 4);  // 从高位提取级别
     
     /* ZSTD支持级别1-22，0表示使用默认 */
     if (level == 0) {
