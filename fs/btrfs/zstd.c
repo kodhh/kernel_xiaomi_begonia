@@ -380,7 +380,7 @@ out:
         kunmap(in_page);
         put_page(in_page);
     }
-    if (out_page && out_page->mapping) {
+    if (out_page) {
         kunmap(out_page);
     }
     
@@ -474,6 +474,7 @@ static int zstd_decompress_bio(struct list_head *ws, struct compressed_bio *cb)
             
             if (!pages_in[page_in_index]) {
                 pr_err("BTRFS: NULL page in input array\n");
+                workspace->in_buf.src = NULL;
                 ret = -EIO;
                 goto done;
             }
