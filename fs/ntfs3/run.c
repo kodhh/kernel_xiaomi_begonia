@@ -231,7 +231,7 @@ bool run_lookup_entry(const struct runs_tree *run, CLST vcn, CLST *lcn,
  */
 void run_truncate_head(struct runs_tree *run, CLST vcn)
 {
-	size_t index = 0;
+	size_t index;
 	struct ntfs_run *r;
 
 	if (run_lookup(run, vcn, &index)) {
@@ -365,6 +365,10 @@ requires_new_range:
 		 */
 		used = run->count * sizeof(struct ntfs_run);
 
+		/* Check for integer overflow */
+		if (used / sizeof(struct ntfs_run) != run->count)
+			goto out;
+
 		/*
 		 * Check allocated space.
 		 * If one is not enough to get one more entry
@@ -488,6 +492,8 @@ requires_new_range:
 		return false;
 
 	return true;
+out:
+	return false;
 }
 
 /*helper for attr_collapse_range, which is helper for fallocate(collapse_range)*/
@@ -828,9 +834,9 @@ int run_pack(const struct runs_tree *run, CLST svcn, CLST len, u8 *run_buf,
 			prev_lcn = lcn;
 		}
 
-		tmp = run_buf_size - packed_size - 2 - offset_size;
-		if (tmp <= 0)
+		if (packed_size + 2 + offset_size > run_buf_size)
 			goto out;
+		tmp = run_buf_size - packed_size - 2 - offset_size;
 
 		/* can we store this entire run */
 		if (tmp < size_size)
@@ -923,6 +929,9 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 		if (size_size > 8)
 			return -EINVAL;
 
+		if (run_buf + size_size > run_last)
+			return -EINVAL;
+
 		len = run_unpack_s64(run_buf, size_size, 0);
 		/* skip size_size */
 		run_buf += size_size;
@@ -935,6 +944,9 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 		else if (offset_size <= 8) {
 			s64 dlcn;
 
+			if (run_buf + offset_size > run_last)
+				return -EINVAL;
+
 			/* initial value of dlcn is -1 or 0 */
 			dlcn = (run_buf[offset_size - 1] & 0x80) ? (s64)-1 : 0;
 			dlcn = run_unpack_s64(run_buf, offset_size, dlcn);
@@ -943,17 +955,25 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 
 			if (!dlcn)
 				return -EINVAL;
+			if (dlcn > 0 && prev_lcn + dlcn < prev_lcn)
+				return -EINVAL;
+			if (dlcn < 0 && prev_lcn + dlcn > prev_lcn)
+				return -EINVAL;
 			lcn = prev_lcn + dlcn;
 			prev_lcn = lcn;
 		} else
 			return -EINVAL;
 
 		next_vcn = vcn64 + len;
+		if (next_vcn < vcn64)
+			return -EINVAL;
 		/* check boundary */
 		if (next_vcn > evcn + 1)
 			return -EINVAL;
 
 #ifndef CONFIG_NTFS3_64BIT_CLUSTER
+		if ((lcn + len) < lcn)
+			return -EINVAL;
 		if (next_vcn > 0x100000000ull || (lcn + len) > 0x100000000ull) {
 			ntfs_err(
 				sbi->sb,
@@ -1010,8 +1030,8 @@ int run_unpack_ex(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 		  u32 run_buf_size)
 {
 	int ret, err;
-	CLST next_vcn, lcn = 0, len = 0;
-	size_t index = 0;
+	CLST next_vcn, lcn, len;
+	size_t index;
 	bool ok;
 	struct wnd_bitmap *wnd;
 

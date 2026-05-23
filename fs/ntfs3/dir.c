@@ -41,6 +41,11 @@ int ntfs_utf16_to_nls(struct ntfs_sb_info *sbi, const struct le_str *uni,
 		return ret;
 	}
 
+	if (uni->len > 0x7fffffff) {
+		warn = 1;
+		return -EINVAL;
+	}
+
 	ip = uni->name;
 	op = buf;
 	uni_len = uni->len;
@@ -304,6 +309,9 @@ static inline int ntfs_filldir(struct ntfs_sb_info *sbi, struct ntfs_inode *ni,
 		return 0;
 
 	if (sbi->options.nohidden && (fname->dup.fa & FILE_ATTRIBUTE_HIDDEN))
+		return 0;
+
+	if (fname->name_len + sizeof(struct NTFS_DE) > le16_to_cpu(e->size))
 		return 0;
 
 	name_len = ntfs_utf16_to_nls(sbi, (struct le_str *)&fname->name_len,
