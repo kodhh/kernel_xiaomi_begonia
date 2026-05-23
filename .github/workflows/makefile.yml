@@ -1,0 +1,58 @@
+name: Build Begonia Kernel with Clang
+
+on:
+  push:
+    branches: [ fifteen-fixed ]
+  pull_request:
+    branches: [ fifteen-fixed ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CLANG_PATH: /home/runner/prebuilt/clang
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+    - name: Clone Clang Toolchain
+      run: |
+        mkdir -p $CLANG_PATH
+        git clone --depth=1 --single-branch -b android14-release \
+          https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+          $CLANG_PATH || { echo "CLANG clone failed"; exit 1; }
+
+    - name: Configure Kernel
+      run: |
+        export PATH="$CLANG_PATH/clang-r475365b/bin:$PATH"
+        make ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          begonia_user_defconfig O=out
+
+    - name: Build Kernel
+      run: |
+        export PATH="$CLANG_PATH/clang-r475365b/bin:$PATH"
+        KSU_VERSION=$(cd KernelSU && expr $(/usr/bin/git rev-list --count HEAD) + 13000)
+        make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+          CC=clang \
+          AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump STRIP=llvm-strip \
+          LD=ld.lld \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          KSU_VERSION=$KSU_VERSION \
+          O=out
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: out/arch/arm64/boot/Image.gz-dtb
